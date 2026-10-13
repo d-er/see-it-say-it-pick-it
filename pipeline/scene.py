@@ -88,6 +88,7 @@ class SceneFile:
     objects: list
     trays: list = field(default_factory=list)
     hand: np.ndarray | None = None
+    relations: dict | None = None      # geometry.relations(); measured at run time, not stored in the file
 
     @property
     def hand_present(self) -> bool:

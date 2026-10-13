@@ -28,6 +28,11 @@ ROUND_MIN_FILL = 0.75    # an object is round if it fills this share of its encl
 # A mask within this many pixels of the hand mask counts as held or touched by the hand (1 px = 0.25 mm).
 HAND_TOUCH_PX = 12
 
+# "Closest to X" and "farthest from X" are checked on centre distances. Candidates within this many mm of the
+# best one count as tied, and Apertus's choice among them stands: the centre of a partly hidden or tall
+# object is not known better than this. Dev: the two red gears of scene_10 are 98 and 99 mm from the mandarin.
+DISTANCE_TIE_MM = 5
+
 # Apertus server (vLLM). Weights take 17.2 GB; the rest of the share is KV cache.
 APERTUS_MODEL = "swiss-ai/Apertus-v1.5-8B"
 GPU_MEMORY_UTILIZATION_MAX = 0.85   # weights 17.2 GB + 1.2 GB KV cache for MAX_MODEL_LEN; requests are text only
@@ -41,6 +46,10 @@ SEED = 0
 MAX_TOKENS = 700
 REQUEST_TIMEOUT_S = 120
 MAX_RETRIES = 2          # validator corrections sent back to Apertus per instruction
+
+# run.py warns when more than this share of the answers is ask_user or refuse. The public set has 20%;
+# far more means that something upstream broke (objects not found, trays missing).
+NO_PLAN_ALARM_SHARE = 0.35
 
 # ---------------------------------------------------------------- perception
 # (model id, revision). Pinned so that a later upload to the Hub cannot change the result.

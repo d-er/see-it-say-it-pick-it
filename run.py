@@ -72,6 +72,7 @@ def main() -> None:
     for folder in folders:
         scenes.append((folder.name, *prepare(folder, args.scene_files, set(filter(None, args.only.split(","))))))
         print(f"{folder.name}: {len(scenes[-1][1].objects)} objects", flush=True)
+    perception.release()   # Apertus needs the GPU memory
     print(f"scenes prepared in {time.time() - start:.0f} s", flush=True)
 
     results, fallbacks, done = [], 0, 0

@@ -54,22 +54,50 @@ def _hull_mask(mask: np.ndarray) -> np.ndarray:
     return out.astype(bool)
 
 
-def stacking(objects: list) -> dict:
+def _circle_mask(mask: np.ndarray) -> np.ndarray:
+    vs, us = np.nonzero(mask)
+    (cx, cy), r = cv2.minEnclosingCircle(np.column_stack((us, vs)).astype(np.float32))
+    out = np.zeros(mask.shape, np.uint8)
+    cv2.circle(out, (int(round(cx)), int(round(cy))), int(round(r)), 1, -1)
+    return out.astype(bool)
+
+
+def stacking(objects: list, hand: np.ndarray | None = None) -> dict:
     """{(top_id, bottom_id): cover}. Masks hold visible pixels only, so the object underneath has a
-    piece missing where the upper one hides it: the upper object fills part of the lower one's convex
-    hull, while the lower one fills almost none of the upper one's. The two masks must also touch."""
+    piece missing where the upper one hides it. Its full outline is estimated in two ways: the convex
+    hull of what is visible, and, for a round object, the smallest circle around it (a disc cut by a
+    straight edge is still convex, so its hull shows nothing missing). The upper object fills part of
+    that outline, while the lower one fills almost none of the upper one's hull. The two masks must
+    also be next to each other."""
+    k = 2 * config.CONTACT_GROW_PX + 1
+    grown = {o.id: cv2.dilate(o.mask.astype(np.uint8), np.ones((k, k), np.uint8)).astype(bool) for o in objects}
     hulls = {o.id: _hull_mask(o.mask) for o in objects}
-    grown = {o.id: cv2.dilate(o.mask.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) for o in objects}
+    outlines = {}
+    for o in objects:
+        outlines[o.id] = [hulls[o.id]]
+        others = [grown[p.id] for p in objects if p.id != o.id] + ([hand] if hand is not None else [])
+        circle = _circle_mask(o.mask)
+        free = circle & ~np.any(others, axis=0) if others else circle
+        if free.any() and (o.mask & free).sum() >= config.ROUND_MIN_FILL * free.sum():
+            outlines[o.id].append(circle)
+
+    def lies_on(top, bottom):
+        """(pixels of `top` inside the outline of `bottom`, cover) or None."""
+        best = max(((int((shape & top.mask).sum()), float((shape & top.mask).sum() / shape.sum()))
+                    for shape in outlines[bottom.id]), key=lambda c: c[1])
+        reverse = int((hulls[top.id] & bottom.mask).sum())
+        return best if best[1] >= config.ON_TOP_MIN_COVER and best[0] >= config.ON_TOP_RATIO * reverse else None
+
     pairs = {}
-    for top in objects:
-        for bottom in objects:
-            if top.id == bottom.id or int((grown[top.id] & grown[bottom.id]).sum()) < config.CONTACT_MIN_PX:
+    for i, a in enumerate(objects):
+        for b in objects[i + 1:]:
+            if int((grown[a.id] & grown[b.id]).sum()) < config.CONTACT_MIN_PX:
                 continue
-            covered = int((hulls[bottom.id] & top.mask).sum())
-            reverse = int((hulls[top.id] & bottom.mask).sum())
-            cover = covered / int(hulls[bottom.id].sum())
-            if cover >= config.ON_TOP_MIN_COVER and covered >= config.ON_TOP_RATIO * reverse:
-                pairs[(top.id, bottom.id)] = round(cover, 3)
+            ab, ba = lies_on(a, b), lies_on(b, a)
+            if ab and (not ba or ab[0] >= ba[0]):
+                pairs[(a.id, b.id)] = round(ab[1], 3)
+            elif ba:
+                pairs[(b.id, a.id)] = round(ba[1], 3)
     return pairs
 
 
@@ -91,7 +119,7 @@ def measure(scene: SceneFile, to_mm, gripper_mm: float = config.GRIPPER_MAX_OPEN
         o.in_tray = next((t.id.replace("_tray", "") for t in scene.trays if _in_outline(o.centre_px, t.outline_px)), None)
         o.on_top_of, o.under = [], []
         o.held_by_hand = bool(hand_near is not None and (hand_near & o.mask).any())
-    for (top, bottom) in stacking(scene.objects):
+    for (top, bottom) in stacking(scene.objects, scene.hand if scene.hand_present else None):
         if not graspable(scene.get(top), gripper_mm):
             continue   # a dish is never "on" something: see config.py
         scene.get(top).on_top_of.append(bottom)

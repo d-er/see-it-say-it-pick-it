@@ -1,4 +1,7 @@
 # Python 3.11 recommended
 numpy
 opencv-python
-# to run Apertus locally (GPU): pip install vllm
+# pipeline (run.py): GPU needed
+#   pillow, torch, and a transformers build with Grounding DINO, SAM 2 and SigLIP 2 (>= 4.56).
+#   Apertus v1.5 needs the vLLM and transformers builds named on its model card
+#   (https://huggingface.co/swiss-ai/Apertus-v1.5-8B); perception runs in that same environment.

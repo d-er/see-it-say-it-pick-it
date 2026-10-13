@@ -1,0 +1,15 @@
+{
+  "scene": "example",
+  "image_size": [16, 10],
+  "hand_present": false,
+  "trays": [{"id": "grey_tray", "outline_px": [[0, 0], [7, 0], [7, 9], [0, 9]]},
+            {"id": "black_tray", "outline_px": [[8, 0], [15, 0], [15, 9], [8, 9]]}],
+  "hand": null,
+  "objects": [
+    {"id": "red_cube_1", "label": "cube", "colour": "red",
+     "mask": {"size": [10, 16], "counts": [33, 3, 13, 3, 13, 3, 92]}},
+    {"id": "yellow_gear_1", "label": "gear", "colour": "yellow",
+     "mask": {"size": [10, 16], "counts": [90, 4, 12, 4, 12, 4, 34]},
+     "on_top_of": [], "under": []}
+  ]
+}

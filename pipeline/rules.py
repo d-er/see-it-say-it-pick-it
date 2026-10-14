@@ -218,6 +218,27 @@ def _order_facts(reply: dict, scene: SceneFile) -> tuple[set, str] | None:
     return fits, "from left to right the candidates are " + ", ".join(o.id for o in row)
 
 
+def _selector_or_destination(reply: dict, both: list, measured: tuple | None) -> str:
+    """The selector refers to an object that is also a destination. Where the measurement can say whether the
+    relation holds ("lies on", "lies under", "in the tray"), the message says which of the two readings that leaves."""
+    selector, ids = reply["selector"].strip(), ", ".join(both)
+    head = (f'selector "{selector}" refers to {ids}, and destinations also has {ids}. One object is not both what '
+            "singles out the object and where it goes. ")
+    as_destination = ('The words say where the object should be put, so they are no selector: set selector to "", '
+                      'selector_type to "none", selector_reference_ids and selector_check to empty, and keep '
+                      f"{ids} in destinations.")
+    as_selector = (f"The words say which object is meant, so remove {ids} from destinations and put there only the "
+                   "place the instruction says the object should go.")
+    if measured is not None and reply["selector_type"] in ("lying_on", "lying_under", "in_tray"):
+        fits, facts = measured
+        if fits:
+            return head + f"Measured: {facts}. So {', '.join(sorted(fits))} fits the selector. " + as_selector
+        return head + f"Measured: {facts}. So no candidate fits it as a selector. " + as_destination
+    return (head + 'If the words say where the object should be put ("on the bowl", "into the tray"): '
+            + as_destination[as_destination.index("set"):] + ' If they say which object is meant ("under the block", '
+            '"lying on the bolt"): ' + as_selector[as_selector.index("remove"):])
+
+
 def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_MAX_OPENING_MM,
              instruction: str = "") -> list:
     """Problems with a reply, as sentences Apertus can act on. Empty list: the reply stands."""
@@ -245,6 +266,9 @@ def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_M
     if misread:
         return [misread]
     measured = _selector_facts(reply, scene)
+    both = [r for r in dict.fromkeys(reply["selector_reference_ids"]) if r in reply["destinations"]]
+    if reply["selector_type"] in REFERRING_SELECTORS and both:
+        return [_selector_or_destination(reply, both, measured)]
     if measured is not None:
         fits, facts = measured
         tie = reply["selector_type"] in ("closest_to", "farthest_from") and len(fits) > 1

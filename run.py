@@ -114,7 +114,7 @@ def check(scenes: list, results: list) -> list:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data", type=Path, default=Path("dataset"), help="folder with scene_* subfolders")
+    ap.add_argument("--data", type=Path, default=Path("dataset"), help="folder with one subfolder per scene (rgb.png + instructions.txt)")
     ap.add_argument("--out", type=Path, default=Path("results.json"))
     ap.add_argument("--team", default="Claw & Order")
     ap.add_argument("--scene-files", type=Path, help="folder with <scene>.json scene files; skips perception")
@@ -128,9 +128,9 @@ def main() -> None:
     args = ap.parse_args()
     trace_path = args.trace or args.out.with_suffix(".trace.jsonl")
 
-    folders = sorted(p for p in args.data.glob("scene_*") if (p / "rgb.png").exists())
+    folders = sorted(p for p in args.data.iterdir() if (p / "rgb.png").exists())
     if not folders:
-        sys.exit(f"no scene_*/rgb.png under {args.data}")
+        sys.exit(f"no <scene>/rgb.png under {args.data}")
 
     start = time.time()
     scenes = []

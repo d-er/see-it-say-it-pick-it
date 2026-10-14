@@ -220,11 +220,12 @@ def answer(instruction: str, scene: SceneFile, scene_text: str, base_url: str, m
         except (OSError, ValueError, KeyError) as e:
             trace.append({"attempt": attempt, "error": f"{type(e).__name__}: {e}"})
             continue
+        normalised = rules.normalise(reply)
         errors = rules.validate(reply, scene, gripper_mm, instruction)
         if not errors and not doubted:          # asked once: the second refusal stands
             doubt = rules.name_doubt(reply, scene)
             errors, doubted = ([doubt], True) if doubt else (errors, False)
-        trace.append({"attempt": attempt, "reply": reply, "errors": errors})
+        trace.append({"attempt": attempt, "reply": reply, "errors": errors, **({"normalised": normalised} if normalised else {})})
         if not errors:
             trace.append({"final": "apertus"})
             return reply, trace

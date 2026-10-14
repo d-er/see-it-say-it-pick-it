@@ -105,6 +105,17 @@ def _words(text: str) -> list:
     return "".join(c if c.isalnum() else " " for c in text.lower()).split()
 
 
+def normalise(reply: dict) -> dict:
+    """Clears slots that only repeat another slot, so a right reply is not sent back for its form. Takes no
+    decision for Apertus. Returns {slot: value Apertus gave} for every slot it changed."""
+    if reply["selector_type"] == "none" and reply["selector"].strip() and \
+            set(_words(reply["selector"])) <= set(_words(reply["object_words"])) | {"the", "a", "an"}:
+        changed = {"selector": reply["selector"]}
+        reply["selector"] = ""          # "the cube" with object_words "cube": no selector
+        return changed
+    return {}
+
+
 def _reading(reply: dict, scene: SceneFile, instruction: str) -> str | None:
     """Slots that contradict each other or the instruction's own words. These are about how Apertus split
     the sentence, before any object is chosen."""

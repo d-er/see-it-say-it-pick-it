@@ -116,7 +116,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("dataset"), help="folder with scene_* subfolders")
     ap.add_argument("--out", type=Path, default=Path("results.json"))
-    ap.add_argument("--team", default="team")
+    ap.add_argument("--team", default="Uetzel-Bruetzel")
     ap.add_argument("--scene-files", type=Path, help="folder with <scene>.json scene files; skips perception")
     ap.add_argument("--cache", type=Path, default=REPO / "cache", help="folder for perception results")
     ap.add_argument("--no-cache", action="store_true", help="run perception even if a cached result exists")

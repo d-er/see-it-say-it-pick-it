@@ -64,7 +64,7 @@ def _wrong_kind(reply: dict, scene: SceneFile) -> str | None:
     ids = [scene.get(i) for i in dict.fromkeys(reply["candidate_ids"] + reply["matching_ids"])]
     kind = reply["object_kind"].strip().lower()
     if kind and any(o.label == kind for o in scene.objects):
-        wrong = [o for o in ids if o.label != kind]
+        wrong = [o for o in ids if o.label != kind and kind not in o.other_labels]
         if wrong:
             return (f'object_kind is "{kind}", but ' + ", ".join(f"{o.id} is a {o.label}" for o in wrong)
                     + f". candidate_ids and matching_ids may hold only objects that are a {kind}.")
@@ -80,6 +80,25 @@ def _wrong_kind(reply: dict, scene: SceneFile) -> str | None:
         return (f'object_words is "{reply["object_words"].strip()}", but ' + ", ".join(f"{o.id} is {o.colour}" for o in wrong)
                 + f". candidate_ids and matching_ids may hold only objects that are {said[0]}.")
     return None
+
+
+def name_doubt(reply: dict, scene: SceneFile) -> str | None:
+    """A refusal because nothing is called object_kind, while an object of the right colour has a name the naming
+    model was unsure of, or "could also be" that kind. Apertus is asked once whether that object is meant."""
+    kind = reply["object_kind"].strip().lower()
+    if reply["kind"] != "refuse" or reply["refuse_because"] != "no_matching_object" or not kind:
+        return None
+    if any(o.label == kind for o in scene.objects):
+        return None
+    colours = [w for w in _words(reply["object_words"]) if w in COLOUR_WORDS]
+    unsure = [o for o in scene.objects if (not colours or o.colour in colours) and (
+        kind in o.other_labels or (o.name_score is not None and o.name_score < config.NAME_SURE_SCORE))]
+    if not unsure:
+        return None
+    return (f'You refuse because no listed object is a {kind}. The names in the list are guesses of an image model, and '
+            f'it was unsure about {", ".join(o.id for o in unsure)}. If {"it" if len(unsure) == 1 else "one of them"} '
+            f'can be the {reply["object_words"].strip()} the instruction means, put {"its id" if len(unsure) == 1 else "the ids that can be"} '
+            'in candidate_ids and matching_ids and answer again. If none can be, give the same refusal again.')
 
 
 def _words(text: str) -> list:

@@ -19,7 +19,7 @@ SELECTOR_TYPES = ["none", "order", "closest_to", "farthest_from", "left_of", "ri
 ORDER_RANKS = ["none"] + [f"{n} from the {side}" for side in ("left", "right") for n in ("1st", "2nd", "3rd", "4th", "5th")] + ["middle"]
 REFUSE_BECAUSE = ["not_refused", "unsafe_motion", "no_matching_object", "cannot_be_picked", "impossible_as_stated"]
 
-SYSTEM = """You plan pick-and-place actions for a robot arm with a two-finger gripper. A camera looks down at a table. Another program has found the objects in the photo and measured them. You get that list and one instruction from a person. You do not see the photo, so rely on the list.
+SYSTEM = """You plan pick-and-place actions for a robot arm with a two-finger gripper. A camera looks down at a table. Another program has found the objects in the photo and measured them. You get that list and one instruction from a person. You do not see the photo, so rely on the list. The object names are the best guess of an image model: "name uncertain" means the guess was weak and the object may be another kind of thing of that colour; "could also be a ..." gives a second name the model nearly chose.
 
 Left and right are as seen in the photo. The gripper holds one object at a time.
 
@@ -52,7 +52,7 @@ quantity: "one" if a single object is meant, "several" if more than one (all, bo
 destinations: where the instruction says the objects should be put: tray ids, ids of objects to put them on, or "table" if the instruction itself says table, or "human_hand" if the instruction says to put the object into or onto a person's hand or body. Empty if the instruction only asks to pick ("hand me", "give me" are picks).
 forbidding_words: the words of the instruction that forbid moving or touching something ("without moving the block", "do not touch the bowl", "leave it where it is", "except the bowl"). Copy them from the instruction. "" if it has no such words, which is the usual case.
 do_not_move_ids: ids of the objects that forbidding_words says must stay where they are. This can be the object to be moved itself, if the instruction also says to leave it where it is. Empty if forbidding_words is "".
-candidate_ids: ids of all listed objects whose label and colour fit object_words. An object of another colour or another kind does not fit. If object_kind is "", every listed object is a candidate. Empty if none fits.
+candidate_ids: ids of all listed objects whose label and colour fit object_words. An object of another colour or another kind does not fit. If no listed object has the kind of object_kind as its name, an object of the right colour whose name is uncertain, or that could also be that kind, fits. If object_kind is "", every listed object is a candidate. Empty if none fits.
 selector_check: if there is a selector, one entry per candidate: its id, the measured fact from the list that decides the selector for it, and whether it fits (true or false). For "closest to X", "farthest from X" and similar, read the distance line of X: the candidate that comes first in it is the closest, the one that comes last is the farthest, and exactly that one fits, however near or far it is. Empty list if there is no selector.
 matching_ids: ids of the objects that are meant: the candidates whose selector_check says fits true, or all candidates if there is no selector. If none fits, leave the list empty.
 kind:
@@ -105,6 +105,20 @@ Example answers for that scene:
 "take the bolt but do not touch the block" -> {"action_type": "pick", "object_words": "bolt", "selector": "", "selector_type": "none", "selector_reference_ids": [], "order_rank": "none", "object_kind": "bolt", "quantity": "one", "destinations": [], "forbidding_words": "but do not touch the block", "do_not_move_ids": ["green_block_1"], "candidate_ids": ["steel_bolt_1"], "selector_check": [], "matching_ids": ["steel_bolt_1"], "kind": "refuse", "refuse_because": "impossible_as_stated", "actions": [], "question": "", "reason": "The block lies on the bolt, so the bolt cannot be picked without moving the block."}"""
 
 
+def _article(noun: str) -> str:
+    return f"{'an' if noun[0] in 'aeiou' else 'a'} {noun}"
+
+
+def _naming(o) -> str:
+    """The object's name with what the naming model was unsure about."""
+    doubts = []
+    if o.other_labels:
+        doubts.append("could also be " + " or ".join(_article(n) for n in o.other_labels))
+    if o.name_score is not None and o.name_score < config.NAME_SURE_SCORE:
+        doubts.append("name uncertain")
+    return o.name + (f" ({', '.join(doubts)})" if doubts else "")
+
+
 def _ordinal(n: int) -> str:
     return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
@@ -114,7 +128,7 @@ def describe(scene: SceneFile, relations: dict, gripper_mm: float = config.GRIPP
     lines, layout, distances = ["Objects:"], [], []
     for oid in relations["left_to_right"]:
         o, r = scene.get(oid), relations[oid]
-        parts = [f"{o.name}.", f"In the {o.in_tray} tray." if o.in_tray else "On the table."]
+        parts = [f"{_naming(o)}.", f"In the {o.in_tray} tray." if o.in_tray else "On the table."]
         if graspable(o, gripper_mm):
             parts.append(f"{o.width_mm:.0f} mm wide, can be picked.")
         else:
@@ -198,7 +212,7 @@ def answer(instruction: str, scene: SceneFile, scene_text: str, base_url: str, m
     schema = reply_schema(scene)
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": f"Scene:\n{scene_text}\n\nInstruction: \"{instruction}\""}]
-    trace, reply = [], None
+    trace, reply, doubted = [], None, False
     for attempt in range(config.MAX_RETRIES + 1):
         try:
             raw = chat(base_url, model, messages, schema)
@@ -207,6 +221,9 @@ def answer(instruction: str, scene: SceneFile, scene_text: str, base_url: str, m
             trace.append({"attempt": attempt, "error": f"{type(e).__name__}: {e}"})
             continue
         errors = rules.validate(reply, scene, gripper_mm, instruction)
+        if not errors and not doubted:          # asked once: the second refusal stands
+            doubt = rules.name_doubt(reply, scene)
+            errors, doubted = ([doubt], True) if doubt else (errors, False)
         trace.append({"attempt": attempt, "reply": reply, "errors": errors})
         if not errors:
             trace.append({"final": "apertus"})

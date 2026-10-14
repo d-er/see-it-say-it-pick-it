@@ -105,6 +105,12 @@ CROP_SCALE = 1.2             # naming crop: the object's box enlarged by this fa
 CROP_BLUR_SIGMA = 25         # px; everything outside the mask is blurred, so that a neighbour or the object
                              # underneath is not named instead (a mug standing on a gear was called "gear")
 NAME_MIN_SCORE = 0.0         # below this the object is called UNKNOWN_LABEL
+NAME_SURE_SCORE = 0.04       # below this the scene text says the name is uncertain. With a noun removed from the
+                             # vocabulary, its objects got their substitute name (gear -> part, mug -> saucer,
+                             # banana -> lemon, plate -> saucer) with 0.000 to 0.034; right names were 0.019 to
+                             # 0.99, the lowest the white and grey parts (0.019 to 0.025) and the plates (0.035).
+NAME_OTHER_RATIO = 0.9       # a noun scoring at least this share of the best one is given as a second name:
+                             # mandarin and orange score 0.92 to 0.99 of each other and swap under blur
 UNKNOWN_LABEL = "object"
 
 # Colour name from the pixels (CIELAB chroma, lightness 0 to 100; HSV hue in degrees).
@@ -112,12 +118,15 @@ CHROMA_MIN = 18              # below: no colour (white, grey, black)
 COLOURED_SHARE = 0.5         # share of coloured pixels for the object to have a colour
 BLACK_MAX_L = 25
 GREY_MAX_L = 45              # darker than this (and not black): grey
-WHITE_MIN_L = 75             # lighter than this: white. In between lightness does not decide: the dev scenes
+WHITE_MIN_L = 85             # lighter than this: white. In between lightness does not decide: the dev scenes
                              # have grey metal parts at 55 to 66 and white objects at 60 to 70, because the
-                             # light is uneven. There the naming model is asked for the material instead:
-MATERIALS = {"a photo of something made of white plastic": "white",
-             "a photo of something made of white porcelain": "white",
-             "a photo of something made of grey metal": "grey"}
+                             # light is uneven, and 20 % more light puts a grey part at 78. There the naming
+                             # model is asked for the material instead, metal or plastic, without colour
+                             # words: phrases that also named the colour ("white plastic", "grey metal")
+                             # flipped under small changes of brightness or white balance. The colour with
+                             # the higher mean similarity wins.
+MATERIALS = {"white": ["a photo of a plastic object", "a photo of something made of plastic"],
+             "grey": ["a photo of a metal object", "a photo of something made of metal"]}
 BROWN_MAX_VALUE = 110
 HUES = [("red", 14), ("orange", 30), ("yellow", 70), ("green", 165), ("blue", 265), ("purple", 300),
         ("pink", 335), ("red", 361)]

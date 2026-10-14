@@ -12,6 +12,8 @@ Nothing in here knows where the masks came from.
         {
           "id": "red_gear_1",            # unique in the scene
           "label": "gear",               # noun, without the colour
+          "name_score": 0.94,            # how sure the naming model is of the label (0 to 1)
+          "other_labels": [],            # nouns it scored nearly as high ("orange" for a mandarin)
           "colour": "red",
           "mask": {"size": [h, w], "counts": [...]},     # visible pixels only, run-length encoded
           # filled by geometry.measure():
@@ -75,6 +77,8 @@ class SceneObject:
     on_top_of: list = field(default_factory=list)
     under: list = field(default_factory=list)
     held_by_hand: bool = False
+    name_score: float | None = None
+    other_labels: list = field(default_factory=list)
 
     @property
     def name(self) -> str:

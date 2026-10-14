@@ -403,10 +403,9 @@ def name_objects(rgb: np.ndarray, masks: list) -> list:
 
 def white_or_grey(rgb: np.ndarray, mask: np.ndarray) -> str:
     """For an object without colour whose lightness is between sure grey and sure white: the naming
-    model says what it looks made of (white plastic or porcelain, or grey metal)."""
+    model says what it looks made of (plastic: white, metal: grey)."""
     image = _image_features(rgb, [mask])
-    best = max(config.MATERIALS, key=lambda phrase: float((image @ _text_features((phrase,)).T)[0, 0]))
-    return config.MATERIALS[best]
+    return max(config.MATERIALS, key=lambda colour: float((image @ _text_features(tuple(config.MATERIALS[colour])).T).mean()))
 
 
 # ---------------------------------------------------------------- the stage
@@ -437,12 +436,14 @@ def perceive(name: str, rgb: np.ndarray, debug: dict | None = None) -> SceneFile
     chosen.sort(key=lambda i: np.nonzero(masks[i])[1].mean())      # left to right
     objects, counts = [], {}
     for i in chosen:
-        noun, score, _ = names[i]
+        noun, score, top = names[i]
         label = noun if score >= config.NAME_MIN_SCORE else config.UNKNOWN_LABEL
+        others = [n for n, s in top[1:] if s >= config.NAME_OTHER_RATIO * score and n != label]
         colour = colour_name(rgb, masks[i]) or white_or_grey(rgb, masks[i])
         key = f"{colour}_{label}".replace(" ", "_")
         counts[key] = counts.get(key, 0) + 1
-        objects.append(SceneObject(id=f"{key}_{counts[key]}", label=label, colour=colour, mask=masks[i]))
+        objects.append(SceneObject(id=f"{key}_{counts[key]}", label=label, colour=colour, mask=masks[i],
+                                   name_score=round(score, 3), other_labels=others))
     if debug is not None:
         debug.update(proposals=proposals, masks=masks, dropped=log, chosen=chosen, names=[names[i] for i in chosen])
     return SceneFile(scene=name, image_size=[w, h], objects=objects, trays=trays, hand=hand)

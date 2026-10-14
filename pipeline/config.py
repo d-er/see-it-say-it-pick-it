@@ -93,8 +93,14 @@ MIN_CONTRAST = 18            # CIELAB distance between a mask and the band aroun
                              # tray floor 3 to 4, scratches on the mat 9; the weakest real object 32
 SURROUNDED = 0.9             # share of the band around a mask that lies in a larger mask for it to count as
                              # enclosed. Dev: saucer middle and plate print 1.00; a gear lying on a gear 0.57
-ENCLOSED_NAME_MIN = 0.5      # an enclosed mask is kept as an object only with a name at least this sure and
-                             # different from the outer object's. Dev: enclosed pieces score at most 0.12
+ENCLOSED_NAME_MIN = 0.5      # an enclosed mask is kept as an object only with a name at least this sure and a
+                             # noun or colour different from the outer object's. Dev: enclosed pieces score at most 0.12
+STACK_IN = 0.95              # a mask lying at least this share inside a larger one may be an object on top of it,
+STACK_REST = 0.10            # if the larger one keeps at least this share (and a piece of MIN_OBJECT_PX) outside it.
+                             # Synthetic dev stacks: 14-16 % (cube on gear); mug with and without handle 5 %
+RECALL_ON_TOP_NAME_MIN = 0.7  # a recall-net mask lying on a known object needs a name at least this sure. Dev
+                             # photos and variants: pieces of the white part and the saucer middle 0.50-0.57;
+                             # synthetic stacks and blurred scene_06: real objects on top 0.86-0.996
 
 # Recall net: SAM 2.1 "segment everything" for objects the detector did not propose.
 RECALL_POINTS_PER_SIDE = 32  # the SAM default

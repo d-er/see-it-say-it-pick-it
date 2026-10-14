@@ -208,6 +208,23 @@ def _surrounded(inner: np.ndarray, outer: np.ndarray) -> float:
     return float((band & outer).sum() / max(1, band.sum()))
 
 
+def _on_top(small: np.ndarray, large: np.ndarray, inside: float = config.STACK_IN) -> bool:
+    """`large` is a stack and `small` lies on it: small is almost wholly inside large, and large keeps a
+    piece of its own outside small (the gear teeth around a cube). A mask with and without a mug handle
+    keeps too little to count."""
+    if (small & large).sum() < inside * small.sum():
+        return False
+    rest = cv2.morphologyEx((large & ~small).astype(np.uint8), cv2.MORPH_OPEN, np.ones((15, 15), np.uint8))
+    if rest.sum() < config.STACK_REST * large.sum():
+        return False
+    n, _, stats, _ = cv2.connectedComponentsWithStats(rest, connectivity=8)
+    return n > 1 and stats[1:, cv2.CC_STAT_AREA].max() >= config.MIN_OBJECT_PX
+
+
+def _stacked(a: np.ndarray, b: np.ndarray) -> bool:
+    return _on_top(b, a) if a.sum() > b.sum() else _on_top(a, b)
+
+
 def select(rgb: np.ndarray, masks: list, scores: list, trays: list, hand: np.ndarray | None, log=None):
     """Which masks are objects. Returns (indices, enclosed): `enclosed` maps the index of a mask that
     lies wholly inside a larger one to that larger one; perceive() keeps it only if it gets a clear name.
@@ -238,11 +255,13 @@ def select(rgb: np.ndarray, masks: list, scores: list, trays: list, hand: np.nda
             log.append((i, f"same colour as around it ({contrast:.0f})")); continue
         alive.append(i)
 
-    # duplicates: the better detector score stays
+    # duplicates: the better detector score stays. Not a duplicate: an object and the mask of the whole
+    # stack it lies on (SAM often gives one mask for a cube and the gear under it)
     alive.sort(key=lambda i: -scores[i])
     kept = []
     for i in alive:
-        dup = next((k for k in kept if (masks[i] & masks[k]).sum() / (masks[i] | masks[k]).sum() > config.MASK_DUPLICATE_IOU), None)
+        dup = next((k for k in kept if (masks[i] & masks[k]).sum() / (masks[i] | masks[k]).sum() > config.MASK_DUPLICATE_IOU
+                    and not _stacked(masks[i], masks[k])), None)
         if dup is None:
             kept.append(i)
         else:
@@ -279,11 +298,15 @@ def select(rgb: np.ndarray, masks: list, scores: list, trays: list, hand: np.nda
     return [i for i in kept if masks[i].sum() >= config.MIN_OBJECT_PX], enclosed
 
 
-def recall_net(rgb: np.ndarray, known: list, trays: list, hand: np.ndarray | None, log=None) -> list:
-    """Masks of objects the detector did not propose. SAM 2.1 segments everything from a grid of
-    points; most of that is not an object, so a mask is only taken if it lies in a tray, stands out
-    from the surface around it, is not a long strip (tray rim) or cut by the image border, and is
-    neither covered nor surrounded by something already known (the hole of a part, print on a plate)."""
+def recall_net(rgb: np.ndarray, known: list, trays: list, hand: np.ndarray | None, log=None,
+               n_objects: int | None = None) -> list:
+    """Masks of objects the detector did not propose, as [(mask, outer)]. SAM 2.1 segments everything
+    from a grid of points; most of that is not an object, so a mask is only taken if it lies in a tray,
+    stands out from the surface around it, is not a long strip (tray rim) or cut by the image border, and
+    is neither covered nor surrounded by something already known (the hole of a part, print on a plate).
+    Exception: a mask lying on one of the first `n_objects` known objects, larger than it, whose mask
+    includes part or all of it (a small gear on a big one). `outer` is then that object's index in `known`; perceive() keeps it only if it
+    gets a clear name of its own. Otherwise `outer` is None."""
     from PIL import Image
     from transformers import pipeline
     processor, model, device = _load("segmenter")
@@ -307,7 +330,10 @@ def recall_net(rgb: np.ndarray, known: list, trays: list, hand: np.ndarray | Non
             continue
         if hand is not None and (m & hand).sum() > config.HAND_OVERLAP * area:
             continue
-        if (m & taken).sum() > config.RECALL_MAX_COVERED * area or _surrounded(m, taken) >= config.SURROUNDED:
+        n = len(known) if n_objects is None else n_objects
+        outer = next((k for k in range(n) if known[k].sum() > area and _on_top(m, known[k], config.RECALL_MAX_COVERED)), None)
+        others = taken & ~known[outer] if outer is not None else taken
+        if outer is None and _surrounded(m, taken) >= config.SURROUNDED or (m & others).sum() > config.RECALL_MAX_COVERED * area:
             continue
         (_, _), (rw, rh), _ = cv2.minAreaRect(np.column_stack((us, vs)).astype(np.float32))
         if max(rw, rh) > config.RECALL_MAX_ASPECT * max(1.0, min(rw, rh)):
@@ -315,10 +341,10 @@ def recall_net(rgb: np.ndarray, known: list, trays: list, hand: np.ndarray | Non
         contrast = _contrast(lab, m)
         if contrast < config.MIN_CONTRAST:
             log.append((box, f"recall net: same colour as around it ({contrast:.0f})")); continue
-        m = _largest_part(m & ~taken)
+        m = _largest_part(m & ~others)
         taken |= m
-        added.append(m)
-        log.append((box, f"recall net: added (contrast {contrast:.0f})"))
+        added.append((m, outer))
+        log.append((box, f"recall net: added (contrast {contrast:.0f})" + (f", lies on known object {outer}" if outer is not None else "")))
     return added
 
 
@@ -419,19 +445,34 @@ def perceive(name: str, rgb: np.ndarray, debug: dict | None = None) -> SceneFile
     log = []
     chosen, enclosed = select(rgb, masks, [p[1] for p in proposals], trays, hand, log)
     names = dict(zip(chosen, name_objects(rgb, [masks[i] for i in chosen])))
+
+    def own_object(name, mask, outer, min_score=config.ENCLOSED_NAME_MIN):
+        """A mask inside another object is an object of its own if it is clearly named and differs from
+        the outer object in noun or colour (a yellow gear on a red one); otherwise a piece of it."""
+        return name[1] >= min_score and (name[0] != names[outer][0]
+                                                        or colour_name(rgb, mask) != colour_name(rgb, masks[outer]))
+
     for i, outer in enclosed.items():
         if i not in names:
             continue
-        if names[i][1] >= config.ENCLOSED_NAME_MIN and names[i][0] != names[outer][0]:
+        if own_object(names[i], masks[i], outer):
             masks[outer] = masks[outer] & ~masks[i]          # an object lying in the middle of another one
         else:
             log.append((i, f"piece of {outer} ({names[i][0]} {names[i][1]:.2f})"))
             chosen.remove(i)
     pieces = [masks[i] for i in enclosed if i not in chosen]
-    for m in recall_net(rgb, [masks[i] for i in chosen] + pieces, trays, hand, log):
+    objects_now = list(chosen)
+    for m, outer in recall_net(rgb, [masks[i] for i in objects_now] + pieces, trays, hand, log, len(objects_now)):
+        name = name_objects(rgb, [m])[0]
+        if outer is not None:
+            outer = objects_now[outer]
+            if not own_object(name, m, outer, config.RECALL_ON_TOP_NAME_MIN):
+                log.append((outer, f"recall net: piece of it not added ({name[0]} {name[1]:.2f})"))
+                continue
+            masks[outer] = masks[outer] & ~m                 # an object lying on another one
         masks.append(m)
         proposals.append(([float(v) for v in cv2.boundingRect(m.astype(np.uint8))], 0.0, "recall net"))
-        names[len(masks) - 1] = name_objects(rgb, [m])[0]
+        names[len(masks) - 1] = name
         chosen.append(len(masks) - 1)
     chosen.sort(key=lambda i: np.nonzero(masks[i])[1].mean())      # left to right
     objects, counts = [], {}

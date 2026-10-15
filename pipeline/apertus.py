@@ -45,7 +45,7 @@ def _compute_capability() -> float | None:
 def choose_dtype(requested: str = "auto") -> str:
     """The dtype the weights are served in. Apertus is trained in bfloat16, which vLLM supports from compute
     capability 8.0 on. Older GPUs (Turing, e.g. Quadro RTX 8000) get float32: in float16 the activations
-    overflow and every reply is token 0. float32 needs 32 GB for the weights instead of 17.2 GB."""
+    overflow and every request fails. float32 needs about 34 GB for the weights instead of 17.2 GB."""
     if requested != "auto":
         return requested
     capability = _compute_capability()

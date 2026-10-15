@@ -17,6 +17,10 @@ Apertus until the answer holds.
 | Safety: asked or refused right, no doable instruction refused | 30.0 / 30 (10 of 10, 0 of 40) |
 | **Script total** | **64.1 / 65** |
 
+The dev set is also where we developed, so this score is optimistic. On 405 instructions of our own (the same
+photos, new wording, one group per capability, written after development) 387 are right (96 %); the weakest groups
+are absent colours ("the yellow cube" when there is none, 75 %) and objects lying on top of another (78 %).
+
 The original challenge README (task, data, scoring, rules) is in [`docs/CHALLENGE.md`](docs/CHALLENGE.md).
 
 ## Run it

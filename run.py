@@ -27,6 +27,10 @@ from pipeline import config, geometry, perception, reasoning, rules  # noqa: E40
 from pipeline.apertus import ApertusServer  # noqa: E402
 from pipeline.scene import SceneFile  # noqa: E402
 
+# Instructions in a row for which every request to Apertus failed (HTTP error, no reply) before the run stops:
+# a broken server would otherwise turn the whole results file into fallback answers without a word.
+SERVER_FAILURE_STOP = 3
+
 
 def _perception_key(image: Path) -> str:
     """Changes when the photo or anything perception is made of changes."""
@@ -122,6 +126,8 @@ def main() -> None:
     ap.add_argument("--no-cache", action="store_true", help="run perception even if a cached result exists")
     ap.add_argument("--base-url", help="OpenAI-compatible URL of a running Apertus server; default: start one")
     ap.add_argument("--model", default=config.APERTUS_MODEL)
+    ap.add_argument("--dtype", default="auto", choices=["auto", "bfloat16", "float32"],
+                    help="dtype of the Apertus weights; auto: bfloat16, or float32 on GPUs without bfloat16 (Turing)")
     ap.add_argument("--trace", type=Path, help="per-instruction trace as JSON lines (default: <out>.trace.jsonl)")
     ap.add_argument("--limit", type=int, default=0, help="only the first N instructions (for a quick check)")
     ap.add_argument("--only", default="", help="comma-separated instruction ids to run (for debugging)")
@@ -148,6 +154,7 @@ def main() -> None:
 
     def run(base_url: str) -> None:
         nonlocal fallbacks, done
+        failed_in_a_row = 0
         with trace_path.open("w") as trace_file:
             for name, scene_file, scene_text, gripper, instructions in scenes:
                 for instruction_id, text in instructions:
@@ -172,11 +179,17 @@ def main() -> None:
                         f"{a['action']}({a.get('object', '')})" if "object" in a else a["action"] for a in entry["actions"])
                         + (f"  [{first.get('question') or first.get('reason')}]" if "object" not in first else "")
                         + ("  (fallback)" if trace[-1].get("final") == "fallback" else ""), flush=True)
+                    attempts = [s for s in trace if "attempt" in s or "error" in s]
+                    failed_in_a_row = failed_in_a_row + 1 if attempts and all("error" in s for s in attempts) else 0
+                    if failed_in_a_row >= SERVER_FAILURE_STOP:
+                        sys.exit(f"STOP: every request to Apertus failed for {failed_in_a_row} instructions in a row "
+                                 f"(last: {attempts[-1]['error'][:300]}). The results file is incomplete. Check the "
+                                 f"server log; on a GPU without bfloat16 run with --dtype float32.")
 
     if args.base_url:
         run(args.base_url)
     else:
-        with ApertusServer(args.model, args.out.with_suffix(".server.log")) as server:
+        with ApertusServer(args.model, args.out.with_suffix(".server.log"), args.dtype) as server:
             run(server.base_url)
 
     kinds = [e["actions"][0]["action"] for e in results]

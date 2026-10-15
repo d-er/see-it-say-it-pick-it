@@ -32,6 +32,26 @@ def _gpu_memory_gb() -> tuple[float, float] | None:
         return None
 
 
+def _compute_capability() -> float | None:
+    """CUDA compute capability of the first GPU (8.0 = Ampere, 7.5 = Turing), or None when unknown."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+                             capture_output=True, text=True, check=True, timeout=20).stdout
+        return float(out.splitlines()[0])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+
+
+def choose_dtype(requested: str = "auto") -> str:
+    """The dtype the weights are served in. Apertus is trained in bfloat16, which vLLM supports from compute
+    capability 8.0 on. Older GPUs (Turing, e.g. Quadro RTX 8000) get float32: in float16 the activations
+    overflow and every reply is token 0 (WORKLOG C4). float32 needs 32 GB for the weights instead of 17.2 GB."""
+    if requested != "auto":
+        return requested
+    capability = _compute_capability()
+    return "float32" if capability is not None and capability < 8.0 else "bfloat16"
+
+
 class ApertusServer:
     """Context manager that owns a `vllm serve` process.
 
@@ -39,8 +59,10 @@ class ApertusServer:
             chat(server.base_url, server.model, messages)
     """
 
-    def __init__(self, model: str = config.APERTUS_MODEL, log_path: str | Path = "apertus_server.log"):
+    def __init__(self, model: str = config.APERTUS_MODEL, log_path: str | Path = "apertus_server.log",
+                 dtype: str = "auto"):
         self.model = model
+        self.dtype = choose_dtype(dtype)
         self.log_path = Path(log_path)
         self.port = _free_port()
         self.base_url = f"http://127.0.0.1:{self.port}/v1"
@@ -58,6 +80,7 @@ class ApertusServer:
         cmd = [str(vllm) if vllm.exists() else "vllm", "serve", self.model,
                "--port", str(self.port), "--host", "127.0.0.1",
                "--chat-template-content-format", "string",
+               "--dtype", self.dtype,
                "--gpu-memory-utilization", str(self._utilization()),
                "--max-model-len", str(config.MAX_MODEL_LEN),
                "--max-num-seqs", "1",                       # one request at a time: no batch effects
@@ -71,6 +94,7 @@ class ApertusServer:
                                         start_new_session=True)
         try:
             self._wait_until_ready()
+            self._check_replies()
         except BaseException:
             self.__exit__(None, None, None)
             raise
@@ -92,6 +116,20 @@ class ApertusServer:
                 pass
             time.sleep(2)
         raise TimeoutError(f"the Apertus server was not ready after {config.SERVER_START_TIMEOUT_S} s (see {self.log_path})")
+
+    def _check_replies(self) -> None:
+        """A server can start and still answer nothing but errors (float16 overflow: HTTP 500 on every request).
+        One constrained request before the real ones turns that into a stop instead of a file of fallbacks."""
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
+        try:
+            reply = json.loads(chat(self.base_url, self.model, [{"role": "user", "content": "Is 2 + 2 = 4? Answer as JSON."}],
+                                    schema))
+            if not isinstance(reply.get("ok"), bool):
+                raise ValueError(f"unexpected reply {reply!r}")
+        except (OSError, ValueError, KeyError) as e:
+            raise RuntimeError(f"the Apertus server started in {self.dtype} but cannot answer a test request ({e}). "
+                               f"See {self.log_path}; on a GPU without bfloat16 use --dtype float32.") from e
+        print(f"Apertus answers ({self.dtype})", flush=True)
 
     def __exit__(self, *exc) -> None:
         if self.process is None or self.process.poll() is not None:

@@ -1,0 +1,8 @@
+# Only the code goes into the image (see Dockerfile); data and results are mounted.
+*
+!run.py
+!LICENSE
+!pipeline/
+!starter/
+!schema/
+**/__pycache__

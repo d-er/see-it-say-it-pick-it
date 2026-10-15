@@ -43,6 +43,7 @@ stops the server and prints checks that need no ground truth. Next to the result
 Needs an NVIDIA GPU with ≥ 24 GB, an NVIDIA driver ≥ 580 (CUDA 13), and the NVIDIA container runtime.
 
 ```bash
+docker pull ghcr.io/swiss-ai/vllm_apertus_1.5_release@sha256:634973c5d8a2bd542ae9f7b95bf7a271858a842cdc873b2214671079dd9c1ea9
 docker build -t claw-and-order .
 docker run --rm --gpus all --ipc=host \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
@@ -51,8 +52,9 @@ docker run --rm --gpus all --ipc=host \
 ```
 
 The image is the official swiss-ai image for Apertus v1.5 (the vLLM and transformers builds that the model card
-names), pinned by digest, plus our code and OpenCV. The base image is an 8.9 GB download the first time; after
-that the build takes seconds. Data and results stay on the host (`/work` is the current folder).
+names), pinned by digest, plus our code and OpenCV. The base image is an 8.9 GB download, about 4 minutes on our
+connection: like the model weights, pull it once in advance (first line above). After that the build takes
+seconds. Data and results stay on the host (`/work` is the current folder).
 
 ### Weights
 
@@ -93,14 +95,20 @@ in a row, `run.py` stops with an error instead of writing a file of fallback ans
 
 ## Hardware and time
 
-Measured with the Docker command above on an RTX 5090 Laptop GPU (24 GB, bfloat16), perception from scratch:
+Measured from a fresh clone with the Docker commands above on an RTX 5090 Laptop GPU (24 GB, bfloat16),
+perception from scratch:
 
-| Set | Perception | Apertus server start | Answering | Total |
-|---|---|---|---|---|
-| held-out (5 scenes, 40 instructions) | 104 s | 138 s | ~530 s | 775 s (12.9 min) |
-| dev (10 scenes, 50 instructions) | 180 s | 136 s | ~440 s | 757 s (12.6 min) |
+| Step | held-out (5 scenes, 40 instructions) | dev (10 scenes, 50 instructions) |
+|---|---|---|
+| pull the base image (8.9 GB) | 238 s, once | — |
+| `docker build` | 3 s | — |
+| perception | 102 s | 180 s |
+| Apertus server start | 136 s | 136 s |
+| answering | ~512 s | ~460 s |
+| **run total** | **752 s (12.5 min)** | 778 s (13.0 min) |
 
-Not included: building the image, which first pulls the 8.9 GB base image.
+With the base image pulled in advance, a fresh clone gives the held-out results file in 12.6 minutes;
+including the pull, about 16.6 minutes. Scoring takes a second.
 
 | | |
 |---|---|

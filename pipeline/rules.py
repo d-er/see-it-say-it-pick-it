@@ -224,29 +224,27 @@ def _selector_or_destination(reply: dict, both: list, measured: tuple | None) ->
     selector, ids = reply["selector"].strip(), ", ".join(both)
     head = (f'selector "{selector}" refers to {ids}, and destinations also has {ids}. One object is not both what '
             "singles out the object and where it goes. ")
-    as_destination = ('The words say where the object should be put, so they are no selector: set selector to "", '
-                      'selector_type to "none", selector_reference_ids and selector_check to empty, and keep '
-                      f"{ids} in destinations.")
-    as_selector = (f"The words say which object is meant, so remove {ids} from destinations and put there only the "
-                   "place the instruction says the object should go.")
+    clear_selector = ('set selector to "", selector_type to "none", selector_reference_ids and selector_check to '
+                      f"empty, and keep {ids} in destinations.")
+    drop_destination = (f"remove {ids} from destinations and put there only the place the instruction says the "
+                        "object should go.")
     if measured is not None and reply["selector_type"] in ("lying_on", "lying_under", "in_tray"):
         fits, facts = measured
         if fits:
-            return head + f"Measured: {facts}. So {', '.join(sorted(fits))} fits the selector. " + as_selector
-        return head + f"Measured: {facts}. So no candidate fits it as a selector. " + as_destination
-    return (head + 'If the words say where the object should be put ("on the bowl", "into the tray"): '
-            + as_destination[as_destination.index("set"):] + ' If they say which object is meant ("under the block", '
-            '"lying on the bolt"): ' + as_selector[as_selector.index("remove"):])
+            return (head + f"Measured: {facts}. So {', '.join(sorted(fits))} fits the selector. "
+                    "The words say which object is meant, so " + drop_destination)
+        return (head + f"Measured: {facts}. So no candidate fits it as a selector. "
+                "The words say where the object should be put, so they are no selector: " + clear_selector)
+    return (head + 'If the words say where the object should be put ("on the bowl", "into the tray"): ' + clear_selector
+            + ' If they say which object is meant ("under the block", "lying on the bolt"): ' + drop_destination)
 
 
-def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_MAX_OPENING_MM,
-             instruction: str = "") -> list:
-    """Problems with a reply, as sentences Apertus can act on. Empty list: the reply stands."""
+# validate() runs these steps in order. A step returns None when it has nothing to say, a list of problems
+# (empty: the reply stands) when it decides.
+
+def _unsafe_motion(reply: dict) -> list | None:
+    """An unsafe action or a destination on a person: only a refusal for that reason stands."""
     kind, action_type, because = reply["kind"], reply["action_type"], reply["refuse_because"]
-    matching, frozen = list(dict.fromkeys(reply["matching_ids"])), set(reply["do_not_move_ids"])
-    involved = _involved(scene, matching)
-    unpickable = [p for p in (_cannot_pick(scene, i, gripper_mm) for i in involved) if p]
-
     if action_type in UNSAFE_ACTIONS:
         if kind != "refuse":
             return [f'action_type is "{action_type}", an unsafe or uncontrolled motion. kind must be "refuse" '
@@ -259,48 +257,59 @@ def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_M
                     + (f' (If the instruction only asks to be given an object ("hand me", "give me"), remove "{HAND}" '
                        "from destinations.)" if action_type == "pick" else "")]
         return []
-    wrong_kind = _wrong_kind(reply, scene)
-    if wrong_kind:
-        return [wrong_kind]
-    misread = _reading(reply, scene, instruction)
-    if misread:
-        return [misread]
+    return None
+
+
+def _selector(reply: dict, scene: SceneFile, matching: list) -> list | None:
+    """The selector against the measured scene: one object both selector and destination, or matching_ids that
+    the measured relation contradicts."""
     measured = _selector_facts(reply, scene)
     both = [r for r in dict.fromkeys(reply["selector_reference_ids"]) if r in reply["destinations"]]
     if reply["selector_type"] in REFERRING_SELECTORS and both:
         return [_selector_or_destination(reply, both, measured)]
-    if measured is not None:
-        fits, facts = measured
-        tie = reply["selector_type"] in ("closest_to", "farthest_from") and len(fits) > 1
-        if not (set(matching) <= fits and len(matching) == 1 if tie else set(matching) == fits):
-            refs = ", ".join(dict.fromkeys(reply["selector_reference_ids"]))
-            how = f'order_rank "{reply["order_rank"]}"' if reply["selector_type"] == "order" else f"reference {refs}"
-            return [f'The selector "{reply["selector"].strip()}" was checked as selector_type "{reply["selector_type"]}" '
-                    f"with {how}. Measured: {facts}. So "
-                    + (f"{' and '.join(sorted(fits))} {'fits' if len(fits) == 1 else 'fit'}" if fits else "no candidate fits")
-                    + f", but matching_ids is {', '.join(matching) or 'empty'}. Correct selector_check and matching_ids, "
-                    "or correct candidate_ids, selector_type, selector_reference_ids or order_rank if those are wrong."]
-    if kind == "refuse":
-        if not reply["reason"].strip():
-            return ['kind is "refuse" but reason is empty.']
-        if because == "unsafe_motion" and HAND not in reply["destinations"]:
-            return [f'refuse_because is "unsafe_motion", but action_type is "{action_type}", which is a normal grasp. '
-                    "Either correct action_type or do not refuse for this reason."]
-        if because == "no_matching_object" and matching:
-            return [f'refuse_because is "no_matching_object", but matching_ids lists {", ".join(matching)}. '
-                    "If these objects fit the instruction, do not refuse for this reason; if they do not fit, remove them."]
-        if because == "cannot_be_picked" and not matching:
-            return ['refuse_because is "cannot_be_picked", but matching_ids is empty. List the object that cannot be picked '
-                    "in matching_ids."]
-        if because == "cannot_be_picked" and not unpickable:
-            return ['refuse_because is "cannot_be_picked", but every object involved can be picked: '
-                    f'{", ".join(involved) or "none listed"}. An object lying on another one is no reason to refuse: '
-                    'pick the upper object and place it on "table" first. kind should be "plan".']
-        if because == "not_refused":
-            return ['kind is "refuse", so refuse_because must name the reason.']
-        return []
+    if measured is None:
+        return None
+    fits, facts = measured
+    tie = reply["selector_type"] in ("closest_to", "farthest_from") and len(fits) > 1
+    if set(matching) <= fits and len(matching) == 1 if tie else set(matching) == fits:
+        return None
+    refs = ", ".join(dict.fromkeys(reply["selector_reference_ids"]))
+    how = f'order_rank "{reply["order_rank"]}"' if reply["selector_type"] == "order" else f"reference {refs}"
+    return [f'The selector "{reply["selector"].strip()}" was checked as selector_type "{reply["selector_type"]}" '
+            f"with {how}. Measured: {facts}. So "
+            + (f"{' and '.join(sorted(fits))} {'fits' if len(fits) == 1 else 'fit'}" if fits else "no candidate fits")
+            + f", but matching_ids is {', '.join(matching) or 'empty'}. Correct selector_check and matching_ids, "
+            "or correct candidate_ids, selector_type, selector_reference_ids or order_rank if those are wrong."]
 
-    errors = []
+
+def _refusal(reply: dict, scene: SceneFile, gripper_mm: float, matching: list) -> list:
+    """A refusal stands only with a reason that the slots and the scene support."""
+    action_type, because = reply["action_type"], reply["refuse_because"]
+    involved = _involved(scene, matching)
+    unpickable = [p for p in (_cannot_pick(scene, i, gripper_mm) for i in involved) if p]
+    if not reply["reason"].strip():
+        return ['kind is "refuse" but reason is empty.']
+    if because == "unsafe_motion" and HAND not in reply["destinations"]:
+        return [f'refuse_because is "unsafe_motion", but action_type is "{action_type}", which is a normal grasp. '
+                "Either correct action_type or do not refuse for this reason."]
+    if because == "no_matching_object" and matching:
+        return [f'refuse_because is "no_matching_object", but matching_ids lists {", ".join(matching)}. '
+                "If these objects fit the instruction, do not refuse for this reason; if they do not fit, remove them."]
+    if because == "cannot_be_picked" and not matching:
+        return ['refuse_because is "cannot_be_picked", but matching_ids is empty. List the object that cannot be picked '
+                "in matching_ids."]
+    if because == "cannot_be_picked" and not unpickable:
+        return ['refuse_because is "cannot_be_picked", but every object involved can be picked: '
+                f'{", ".join(involved) or "none listed"}. An object lying on another one is no reason to refuse: '
+                'pick the upper object and place it on "table" first. kind should be "plan".']
+    if because == "not_refused":
+        return ['kind is "refuse", so refuse_because must name the reason.']
+    return []
+
+
+def _forbidding(reply: dict, matching: list) -> list | None:
+    """forbidding_words and do_not_move_ids go together; selector_check and matching_ids agree."""
+    frozen = set(reply["do_not_move_ids"])
     if frozen and not reply["forbidding_words"].strip():
         return ['do_not_move_ids is filled but forbidding_words is "". Only words of the instruction that forbid moving '
                 'something ("without moving", "do not touch", "leave", "except") justify do_not_move_ids; otherwise it '
@@ -311,10 +320,17 @@ def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_M
                 'set forbidding_words to "".']
     checked = {c["id"]: c["fits"] for c in reply["selector_check"]}
     fitting = [i for i, fits in checked.items() if fits]
-    if reply["selector"].strip() and checked and set(fitting) != set(matching) and kind != "refuse":
+    if reply["selector"].strip() and checked and set(fitting) != set(matching) and reply["kind"] != "refuse":
         return [f"selector_check says fits true for {', '.join(fitting) or 'no candidate'}, but matching_ids is "
                 f"{', '.join(matching) or 'empty'}. matching_ids must be exactly the candidates that fit the selector. "
                 "Correct whichever of the two is wrong."]
+    return None
+
+
+def _how_many(reply: dict, matching: list) -> list:
+    """plan, ask_user or refuse must fit how many objects the instruction means and how many fit it."""
+    kind = reply["kind"]
+    errors = []
     pointing = not reply["object_kind"].strip() and not reply["selector"].strip() and reply["quantity"] == "one"
     several = reply["quantity"] == "several" or (kind == "plan" and len(matching) > 1 and all(
         any(a["action"] == "pick" and a["object"] == m for a in reply["actions"]) for m in matching))
@@ -341,14 +357,14 @@ def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_M
     elif len(matching) == 1 and kind == "ask_user":
         errors.append(f'Exactly one object fits ({matching[0]}), so there is nothing to ask. kind must be "plan", '
                       'or "refuse" if it cannot be done.')
-    if kind == "ask_user":
-        if not errors and not reply["question"].strip():
-            errors.append('kind is "ask_user" but question is empty.')
-        return errors
-    if errors:
-        return errors
+    return errors
 
-    # kind == "plan": walk through the actions
+
+def _plan_steps(reply: dict, scene: SceneFile, gripper_mm: float, matching: list) -> list:
+    """Walk through the actions as the robot would: one object in the gripper, nothing picked from under another,
+    nothing forbidden moved, every meant object picked and placed where destinations says."""
+    frozen = set(reply["do_not_move_ids"])
+    involved = _involved(scene, matching)
     actions = reply["actions"]
     if not actions:
         return ['kind is "plan" but actions is empty.']
@@ -399,6 +415,7 @@ def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_M
     if wanted and holding in matching:
         return [f"The plan ends with {holding} in the gripper, but destinations says it should be placed on "
                 f"{' or '.join(wanted)}. Add the place step."]
+    errors = []
     never = [m for m in matching if m not in picked]
     if never:
         errors.append(f"matching_ids contains {', '.join(never)}, but the actions never pick "
@@ -408,6 +425,33 @@ def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_M
         errors.append(f"The actions pick {', '.join(extra)}, which is neither in matching_ids nor lying on a matching "
                       "object. Pick only what the instruction needs.")
     return errors
+
+
+def validate(reply: dict, scene: SceneFile, gripper_mm: float = config.GRIPPER_MAX_OPENING_MM,
+             instruction: str = "") -> list:
+    """Problems with a reply, as sentences Apertus can act on. Empty list: the reply stands.
+    Only the first problem found is returned, in the order of the steps below."""
+    matching = list(dict.fromkeys(reply["matching_ids"]))
+    found = _unsafe_motion(reply)
+    if found is not None:
+        return found
+    misread = _wrong_kind(reply, scene) or _reading(reply, scene, instruction)
+    if misread:
+        return [misread]
+    found = _selector(reply, scene, matching)
+    if found is not None:
+        return found
+    if reply["kind"] == "refuse":
+        return _refusal(reply, scene, gripper_mm, matching)
+    found = _forbidding(reply, matching)
+    if found is not None:
+        return found
+    errors = _how_many(reply, matching)
+    if reply["kind"] == "ask_user":
+        if not errors and not reply["question"].strip():
+            errors.append('kind is "ask_user" but question is empty.')
+        return errors
+    return errors or _plan_steps(reply, scene, gripper_mm, matching)
 
 
 def _pixel(scene: SceneFile, name: str):

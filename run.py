@@ -32,7 +32,7 @@ from pipeline.scene import SceneFile  # noqa: E402
 # a broken server would otherwise turn the whole results file into fallback answers without a word.
 SERVER_FAILURE_STOP = 3
 
-# Instructions sent to Apertus at the same time. With 8 the server batches them and the run is about four times
+# Instructions sent to Apertus at the same time. With 8 the server batches them and answering is about 5.6 times
 # faster, but batching changes Apertus's first tokens enough to change decisions: on dev, 3 of 50 answers differed
 # from the one-at-a-time run, 2 doable instructions were refused, the score fell from 64.1 to 61.8. So the default
 # is one at a time, which gives the same answers from run to run.

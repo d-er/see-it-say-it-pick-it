@@ -78,7 +78,7 @@ With such an environment active, `python run.py ...` works as above.
 | Option | Use |
 |---|---|
 | `--dtype auto\|bfloat16\|float32` | Apertus weights. `auto`: bfloat16, or float32 on GPUs without bfloat16 support (compute capability < 8.0, e.g. Quadro RTX 8000). float16 is not offered: Apertus overflows in float16 and answers nothing. |
-| `--workers N` | send N instructions to Apertus at once (default 1). About four times faster with 8, but batching changes some of Apertus's decisions (dev: 61.8 instead of 64.1), so the submitted results use 1. |
+| `--workers N` | send N instructions to Apertus at once (default 1). Answering is about 5.6 times faster with 8, but batching changes some of Apertus's decisions (dev: 61.8 instead of 64.1), so the submitted results use 1. |
 | `--base-url URL` | use an Apertus server that is already running instead of starting one |
 | `--scene-files DIR` | read ready-made scene files instead of running perception |
 | `--cache DIR`, `--no-cache` | perception results are cached per photo and code version (default `cache/`) |

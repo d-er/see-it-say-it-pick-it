@@ -45,7 +45,7 @@ def _compute_capability() -> float | None:
 def choose_dtype(requested: str = "auto") -> str:
     """The dtype the weights are served in. Apertus is trained in bfloat16, which vLLM supports from compute
     capability 8.0 on. Older GPUs (Turing, e.g. Quadro RTX 8000) get float32: in float16 the activations
-    overflow and every reply is token 0 (WORKLOG C4). float32 needs 32 GB for the weights instead of 17.2 GB."""
+    overflow and every reply is token 0. float32 needs 32 GB for the weights instead of 17.2 GB."""
     if requested != "auto":
         return requested
     capability = _compute_capability()
@@ -60,9 +60,10 @@ class ApertusServer:
     """
 
     def __init__(self, model: str = config.APERTUS_MODEL, log_path: str | Path = "apertus_server.log",
-                 dtype: str = "auto"):
+                 dtype: str = "auto", max_num_seqs: int = 1):
         self.model = model
         self.dtype = choose_dtype(dtype)
+        self.max_num_seqs = max_num_seqs
         self.log_path = Path(log_path)
         self.port = _free_port()
         self.base_url = f"http://127.0.0.1:{self.port}/v1"
@@ -83,7 +84,7 @@ class ApertusServer:
                "--dtype", self.dtype,
                "--gpu-memory-utilization", str(self._utilization()),
                "--max-model-len", str(config.MAX_MODEL_LEN),
-               "--max-num-seqs", "1",                       # one request at a time: no batch effects
+               "--max-num-seqs", str(self.max_num_seqs),    # requests answered together (run.py --workers)
                "--seed", str(config.SEED),
                "--no-enable-flashinfer-autotune"]
         env = dict(os.environ,

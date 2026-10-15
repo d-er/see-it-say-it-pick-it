@@ -16,6 +16,7 @@ import hashlib
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
@@ -30,6 +31,12 @@ from pipeline.scene import SceneFile  # noqa: E402
 # Instructions in a row for which every request to Apertus failed (HTTP error, no reply) before the run stops:
 # a broken server would otherwise turn the whole results file into fallback answers without a word.
 SERVER_FAILURE_STOP = 3
+
+# Instructions sent to Apertus at the same time. With 8 the server batches them and the run is about four times
+# faster, but batching changes Apertus's first tokens enough to change decisions: on dev, 3 of 50 answers differed
+# from the one-at-a-time run, 2 doable instructions were refused, the score fell from 64.1 to 61.8. So the default
+# is one at a time, which gives the same answers from run to run.
+WORKERS = 1
 
 
 def _perception_key(image: Path) -> str:
@@ -128,6 +135,8 @@ def main() -> None:
     ap.add_argument("--model", default=config.APERTUS_MODEL)
     ap.add_argument("--dtype", default="auto", choices=["auto", "bfloat16", "float32"],
                     help="dtype of the Apertus weights; auto: bfloat16, or float32 on GPUs without bfloat16 (Turing)")
+    ap.add_argument("--workers", type=int, default=WORKERS,
+                    help=f"instructions sent to Apertus at the same time (default {WORKERS}; 1 = one after the other)")
     ap.add_argument("--trace", type=Path, help="per-instruction trace as JSON lines (default: <out>.trace.jsonl)")
     ap.add_argument("--limit", type=int, default=0, help="only the first N instructions (for a quick check)")
     ap.add_argument("--only", default="", help="comma-separated instruction ids to run (for debugging)")
@@ -147,51 +156,63 @@ def main() -> None:
     perception.release()   # Apertus needs the GPU memory
     print(f"scenes prepared in {time.time() - start:.0f} s", flush=True)
 
-    results, fallbacks, done = [], 0, 0
-    total = sum(len(s[4]) for s in scenes)
-    if args.limit:
-        total = min(total, args.limit)
+    fallbacks, done, base_url = 0, 0, None
+    jobs = [(name, scene_file, scene_text, gripper, instruction_id, text)
+            for name, scene_file, scene_text, gripper, instructions in scenes for instruction_id, text in instructions]
+    jobs = jobs[:args.limit] if args.limit else jobs
+    entries = [None] * len(jobs)    # results in the order of the instructions, whatever order they finish in
 
-    def run(base_url: str) -> None:
+    def answer_one(job) -> tuple[dict, list, float]:
+        _name, scene_file, scene_text, gripper, instruction_id, text = job
+        t = time.time()
+        try:
+            reply, trace = reasoning.answer(text, scene_file, scene_text, base_url, args.model, gripper)
+            entry = rules.to_answer(reply, scene_file, instruction_id)
+        except Exception as e:   # one bad instruction must never lose the results file
+            trace = [{"error": f"{type(e).__name__}: {e}"}, {"final": "fallback"}]
+            entry = safe_answer(instruction_id, scene_file, gripper)
+        return entry, trace, time.time() - t
+
+    def run() -> None:
         nonlocal fallbacks, done
         failed_in_a_row = 0
+        pool = ThreadPoolExecutor(max_workers=args.workers)
+        futures = {pool.submit(answer_one, job): n for n, job in enumerate(jobs)}
         with trace_path.open("w") as trace_file:
-            for name, scene_file, scene_text, gripper, instructions in scenes:
-                for instruction_id, text in instructions:
-                    if args.limit and done >= args.limit:
-                        return
-                    t = time.time()
-                    try:
-                        reply, trace = reasoning.answer(text, scene_file, scene_text, base_url, args.model, gripper)
-                        entry = rules.to_answer(reply, scene_file, instruction_id)
-                    except Exception as e:   # one bad instruction must never lose the results file
-                        trace = [{"error": f"{type(e).__name__}: {e}"}, {"final": "fallback"}]
-                        entry = safe_answer(instruction_id, scene_file, gripper)
-                    fallbacks += trace[-1].get("final") == "fallback"
-                    results.append(entry)
-                    done += 1
-                    args.out.write_text(json.dumps({"team": args.team, "results": results}, indent=1))
-                    trace_file.write(json.dumps({"instruction_id": instruction_id, "instruction": text, "scene": scene_text,
-                                                 "trace": trace, "answer": entry, "seconds": round(time.time() - t, 2)}) + "\n")
-                    trace_file.flush()
-                    first = entry["actions"][0]
-                    print(f"[{done}/{total}] {instruction_id} {text!r} -> " + ", ".join(
-                        f"{a['action']}({a.get('object', '')})" if "object" in a else a["action"] for a in entry["actions"])
-                        + (f"  [{first.get('question') or first.get('reason')}]" if "object" not in first else "")
-                        + ("  (fallback)" if trace[-1].get("final") == "fallback" else ""), flush=True)
-                    attempts = [s for s in trace if "attempt" in s or "error" in s]
-                    failed_in_a_row = failed_in_a_row + 1 if attempts and all("error" in s for s in attempts) else 0
-                    if failed_in_a_row >= SERVER_FAILURE_STOP:
-                        sys.exit(f"STOP: every request to Apertus failed for {failed_in_a_row} instructions in a row "
-                                 f"(last: {attempts[-1]['error'][:300]}). The results file is incomplete. Check the "
-                                 f"server log; on a GPU without bfloat16 run with --dtype float32.")
+            for future in as_completed(futures):
+                n = futures[future]
+                _name, _scene_file, scene_text, _gripper, instruction_id, text = jobs[n]
+                entry, trace, seconds = future.result()
+                fallbacks += trace[-1].get("final") == "fallback"
+                entries[n] = entry
+                done += 1
+                args.out.write_text(json.dumps({"team": args.team, "results": [e for e in entries if e]}, indent=1))
+                trace_file.write(json.dumps({"instruction_id": instruction_id, "instruction": text, "scene": scene_text,
+                                             "trace": trace, "answer": entry, "seconds": round(seconds, 2)}) + "\n")
+                trace_file.flush()
+                first = entry["actions"][0]
+                print(f"[{done}/{len(jobs)}] {instruction_id} {text!r} -> " + ", ".join(
+                    f"{a['action']}({a.get('object', '')})" if "object" in a else a["action"] for a in entry["actions"])
+                    + (f"  [{first.get('question') or first.get('reason')}]" if "object" not in first else "")
+                    + ("  (fallback)" if trace[-1].get("final") == "fallback" else ""), flush=True)
+                attempts = [s for s in trace if "attempt" in s or "error" in s]
+                failed_in_a_row = failed_in_a_row + 1 if attempts and all("error" in s for s in attempts) else 0
+                if failed_in_a_row >= SERVER_FAILURE_STOP:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    sys.exit(f"STOP: every request to Apertus failed for {failed_in_a_row} instructions in a row "
+                             f"(last: {attempts[-1]['error'][:300]}). The results file is incomplete. Check the "
+                             f"server log; on a GPU without bfloat16 run with --dtype float32.")
+        pool.shutdown()
 
     if args.base_url:
-        run(args.base_url)
+        base_url = args.base_url
+        run()
     else:
-        with ApertusServer(args.model, args.out.with_suffix(".server.log"), args.dtype) as server:
-            run(server.base_url)
+        with ApertusServer(args.model, args.out.with_suffix(".server.log"), args.dtype, args.workers) as server:
+            base_url = server.base_url
+            run()
 
+    results = [e for e in entries if e]
     kinds = [e["actions"][0]["action"] for e in results]
     no_plan = sum(k in ("ask_user", "refuse") for k in kinds)
     print(f"\n{len(results)} answers in {time.time() - start:.0f} s -> {args.out}   trace: {trace_path}")

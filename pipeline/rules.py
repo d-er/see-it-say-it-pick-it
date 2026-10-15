@@ -456,6 +456,10 @@ def fallback(reply: dict | None, scene: SceneFile, gripper_mm: float = config.GR
     if HAND in reply["destinations"]:
         return {**base, "kind": "refuse", "refuse_because": "unsafe_motion",
                 "reason": "The instruction asks the robot to move onto a person."}
+    if reply.get("kind") == "refuse":      # Apertus's own last word was a refusal: when unsure, do not move anything
+        because = reply.get("refuse_because") if reply.get("refuse_because") not in (None, "not_refused") else "no_matching_object"
+        return {**base, "kind": "refuse", "refuse_because": because,
+                "reason": (reply.get("reason") or "").strip() or "No object on the table fits the instruction."}
     candidates = list(dict.fromkeys(reply["candidate_ids"]))
     if not matching and len(candidates) > 1 and reply["quantity"] == "one" and not reply["selector"].strip():
         return {**base, "kind": "ask_user", "matching_ids": candidates, "question": f"Which one do you mean: {', '.join(candidates)}?"}

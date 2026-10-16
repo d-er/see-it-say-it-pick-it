@@ -141,7 +141,9 @@ The code only measures facts and checks replies; it never picks an object by its
 answer. Every threshold is in `pipeline/config.py` with the reason for its value.
 
 **Why not let Apertus look at the photo?** We tried first: given the image and asked for the pixel, Apertus
-hit the right object once in 40 instructions (dev score 2.9 / 65). It sees roughly what is on the table, but
+hit the right object once in 40 instructions (dev score 2.9 / 65 as scored). Three of its pixels lay outside
+the image it saw, so it probably answers on an undocumented 0-1000 scale; read that way it hit 9 of 40 (about
+9.9 / 65), still far from usable. It sees roughly what is on the table, but
 names gears "sun-shaped objects", places things vaguely and misses objects lying on others. With the same
 model reading our measured scene list, the pipeline scores 64.1 / 65.
 

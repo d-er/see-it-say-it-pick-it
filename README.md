@@ -23,6 +23,12 @@ are absent colours ("the yellow cube" when there is none, 75 %) and objects lyin
 
 The original challenge README (task, data, scoring, rules) is in [`docs/CHALLENGE.md`](docs/CHALLENGE.md).
 
+**Hack Apertus submission (Track 2A, ZHAW).** The repository root is the project root. `make run` builds the
+Docker image and runs the pipeline on `heldout/` (`make run DATA=dataset OUT=results.json` for the dev set). The
+technical report is [`technical_report.md`](technical_report.md); the report on Apertus's difficulties is
+[`docs/report.pdf`](docs/report.pdf), the slides are [`docs/slides.pdf`](docs/slides.pdf). Our answers are
+[`results.json`](results.json) (dev) and [`results_heldout.json`](results_heldout.json) (held-out).
+
 ## Run it
 
 One command runs the whole pipeline on any folder of scenes (one subfolder per scene with `rgb.png` and

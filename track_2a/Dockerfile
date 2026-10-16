@@ -4,7 +4,7 @@
 #   docker run --rm --gpus all --ipc=host \
 #       -v ~/.cache/huggingface:/root/.cache/huggingface \
 #       -v "$PWD":/work -w /work \
-#       claw-and-order --data heldout --out results_heldout.json
+#       claw-and-order --data data/heldout --out results_heldout.json
 #
 # Base: the official swiss-ai image for Apertus v1.5 (the vLLM and transformers fork commits that the model
 # card names: vLLM a601a9d, transformers 3797303, torch 2.11.0+cu130), pinned by digest. Needs an NVIDIA
@@ -16,10 +16,10 @@ FROM ghcr.io/swiss-ai/vllm_apertus_1.5_release@sha256:634973c5d8a2bd542ae9f7b95b
 RUN uv pip install --python /opt/venv/bin/python --no-cache opencv-python-headless==5.0.0.93
 
 WORKDIR /app
-COPY run.py LICENSE ./
-COPY pipeline ./pipeline
-COPY starter ./starter
-COPY schema ./schema
+COPY src/run.py ./
+COPY src/pipeline ./pipeline
+COPY src/starter ./starter
+COPY src/schema ./schema
 
 # Weights come from the mounted cache only; nothing is downloaded at run time.
 ENV HF_HUB_OFFLINE=1 \

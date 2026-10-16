@@ -26,13 +26,13 @@ photo ──► perception ──► scene file ──► geometry ──► sce
 
 | Step | Module | Model | Does |
 |---|---|---|---|
-| Perception | `pipeline/perception.py` | Grounding DINO base, SAM 2.1 large, SigLIP 2 | finds, segments and names every object with generic prompts; never reads the instruction |
-| Geometry | `pipeline/geometry.py` | none | widths in mm, stacks, trays, hand, left/right order, neighbours, safe pick point |
-| Reasoning | `pipeline/reasoning.py` | **Apertus v1.5 8B** | plan / ask / refuse, which object is meant and why, the ordered actions (JSON schema with this scene's ids only) |
-| Checks | `pipeline/rules.py` | none | checks the reply against the facts and returns a sentence Apertus can act on; code builds a fallback only if Apertus still fails after two corrections |
+| Perception | `src/pipeline/perception.py` | Grounding DINO base, SAM 2.1 large, SigLIP 2 | finds, segments and names every object with generic prompts; never reads the instruction |
+| Geometry | `src/pipeline/geometry.py` | none | widths in mm, stacks, trays, hand, left/right order, neighbours, safe pick point |
+| Reasoning | `src/pipeline/reasoning.py` | **Apertus v1.5 8B** | plan / ask / refuse, which object is meant and why, the ordered actions (JSON schema with this scene's ids only) |
+| Checks | `src/pipeline/rules.py` | none | checks the reply against the facts and returns a sentence Apertus can act on; code builds a fallback only if Apertus still fails after two corrections |
 
-`run.py` runs perception, frees the GPU, starts its own vLLM server for Apertus, answers every instruction one at a
-time, and stops the server. Every threshold is in `pipeline/config.py` with the reason for its value.
+`src/run.py` runs perception, frees the GPU, starts its own vLLM server for Apertus, answers every instruction one at a
+time, and stops the server. Every threshold is in `src/pipeline/config.py` with the reason for its value.
 
 ## 3. Use of Apertus
 
@@ -48,18 +48,18 @@ a 0–1000 coordinate scale, read that way 9 of 40, about 9.9 / 65). With the me
 the "vision model + Apertus" against "Apertus alone" comparison the challenge asks for.
 
 The template's `LLM_NAME`, `LLM_BASE_URL` and `LLM_API_KEY` are not needed: Apertus is served inside the container
-from the mounted Hugging Face cache, and no API key is used. `run.py --base-url URL` uses an Apertus server that is
+from the mounted Hugging Face cache, and no API key is used. `src/run.py --base-url URL` uses an Apertus server that is
 already running instead.
 
 ## 4. Data
 
-We use the organisers' data only: `dataset/` (10 public scenes, 50 instructions, with ground truth) and `heldout/`
+We use the organisers' data only: `data/dataset/` (10 public scenes, 50 instructions, with ground truth) and `data/heldout/`
 (5 scenes, 40 instructions, without answers), CC BY 4.0. No new dataset was created and nothing was trained: the
 challenge is zero-shot. The ground truth and the category column of `instructions.txt` are never fed into the pipeline.
 
 ## 5. Evaluation
 
-| Dev set, `results.json`, `starter/evaluate.py` | Score |
+| Dev set, `results.json`, `src/starter/evaluate.py` | Score |
 |---|---|
 | Grounding: `target_pixel` on the right object | 34.1 / 35 (39 of 40) |
 | Safety: asked or refused right, no doable instruction refused | 30.0 / 30 (10 of 10, 0 of 40) |
@@ -98,8 +98,8 @@ hf download IDEA-Research/grounding-dino-base --revision 12bdfa3120f3e7ec7b434d9
 hf download facebook/sam2.1-hiera-large --revision 665f8e2ad61cf5f53d65644ff27c8ee525124610
 hf download google/siglip2-so400m-patch14-384 --revision e8e487298228002f3d8a82e0cd5c8ea9c567f57f
 
-make run                                  # heldout/ -> results_heldout.json
-make run DATA=dataset OUT=results.json    # dev set
+make run                                  # data/heldout/ -> results_heldout.json
+make run DATA=data/dataset OUT=results.json    # dev set
 make score                                # official scorer on results.json
 ```
 
@@ -120,11 +120,11 @@ has the per-step timings and the install without Docker.
 
 ## License
 
-Code: Apache 2.0 (`LICENSE`). Data in `dataset/` and `heldout/`: CC BY 4.0, from the organisers.
+Code: Apache 2.0 ([`LICENSE`](../LICENSE)). Data in `data/dataset/` and `data/heldout/`: CC BY 4.0, from the organisers.
 
 ## References
 
-- Challenge description: [`docs/CHALLENGE.md`](docs/CHALLENGE.md), [`EVALUATION.md`](EVALUATION.md)
+- Challenge description: [`docs/CHALLENGE.md`](docs/CHALLENGE.md), [`docs/EVALUATION.md`](docs/EVALUATION.md)
 - Apertus v1.5: https://huggingface.co/swiss-ai/Apertus-v1.5-8B
 - Grounding DINO: https://huggingface.co/IDEA-Research/grounding-dino-base
 - SAM 2.1: https://huggingface.co/facebook/sam2.1-hiera-large

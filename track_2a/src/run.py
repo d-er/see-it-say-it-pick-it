@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the pipeline on a folder of scenes and write the results file.
 
-    python run.py --data dataset --out results.json
-    python run.py --data heldout --out results_heldout.json
+    python src/run.py --data data/dataset --out results.json
+    python src/run.py --data data/heldout --out results_heldout.json
 
 Per scene: perception (image -> scene file) -> geometry (measured facts) -> Apertus (one checked
 reply per instruction). The Apertus server is started and stopped here; pass --base-url to use one
@@ -125,7 +125,7 @@ def check(scenes: list, results: list) -> list:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data", type=Path, default=Path("dataset"), help="folder with one subfolder per scene (rgb.png + instructions.txt)")
+    ap.add_argument("--data", type=Path, default=Path("data/dataset"), help="folder with one subfolder per scene (rgb.png + instructions.txt)")
     ap.add_argument("--out", type=Path, default=Path("results.json"))
     ap.add_argument("--team", default="Claw & Order")
     ap.add_argument("--scene-files", type=Path, help="folder with <scene>.json scene files; skips perception")

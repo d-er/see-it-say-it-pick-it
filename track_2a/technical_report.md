@@ -43,8 +43,8 @@ never picks an object by itself while Apertus can still answer.
 Other open-weight models and their role: **Grounding DINO** (object boxes), **SAM 2.1** (masks), **SigLIP 2** (nouns
 for the objects). They do perception only and never see the instruction. No proprietary model or external API is used.
 
-Apertus on its own, given the photo: it hit the right object in 1 of 40 instructions (2.9 / 65 as scored; probably
-a 0–1000 coordinate scale, read that way 9 of 40, about 9.9 / 65). With the measured scene list: 64.1 / 65. This is
+Apertus on its own, given the photo: it hit the right object in 9 of 40 instructions, 9.9 / 65 (pixels read on a
+0–1000 scale, which the model card does not document; three of them lay outside the image otherwise). With the measured scene list: 64.1 / 65. This is
 the "vision model + Apertus" against "Apertus alone" comparison the challenge asks for.
 
 The template's `LLM_NAME`, `LLM_BASE_URL` and `LLM_API_KEY` are not needed: Apertus is served inside the container
